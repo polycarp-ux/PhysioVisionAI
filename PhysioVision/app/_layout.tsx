@@ -23,7 +23,9 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (onboardingComplete === null) return;
+    
     if (!onboardingComplete) {
+      // Force direct redirection to onboarding
       router.replace('/onboarding');
     }
   }, [onboardingComplete]);
@@ -102,10 +104,15 @@ export default function RootLayout() {
         
         <Tabs.Screen name="therapist" options={{ href: null }} />
         <Tabs.Screen name="elderly" options={{ href: null }} />
+        
+        {/* CRITICAL FIX: Explicitly hide the tab bar when on the onboarding screen.
+          This ensures a completely clean, full-screen onboarding experience.
+        */}
         <Tabs.Screen
           name="onboarding"
           options={{
             href: null,
+            tabBarStyle: { display: 'none' }, // Hides bottom bar entirely
           }}
         />
       </Tabs>

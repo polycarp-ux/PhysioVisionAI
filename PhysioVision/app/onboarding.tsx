@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  ScrollView, Dimensions
+  ScrollView, Dimensions, Platform
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Camera } from 'expo-camera'; // Make sure to install: npx expo install expo-camera
 
 const { width } = Dimensions.get('window');
 
@@ -56,16 +57,30 @@ const DISABILITY_TYPES = [
   { id: 'other', label: 'Other', icon: 'ellipsis-horizontal' },
 ];
 
-const SLIDES = ['welcome', 'role', 'disability', 'accessibility', 'done'];
-
 export default function OnboardingScreen() {
-  const [currentSlide, setCurrentSlide] = useState(0);
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedDisabilities, setSelectedDisabilities] = useState<string[]>([]);
   const [voiceGuidance, setVoiceGuidance] = useState(false);
   const [largeText, setLargeText] = useState(false);
   const [highContrast, setHighContrast] = useState(false);
+  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
+  
   const router = useRouter();
+
+  // ─── Dynamic Slide Flow System ─────────────────────────────────────────────
+  // This builds the active slide sequence on-the-fly depending on user choices
+  const getActiveSlides = () => {
+    const slides = ['welcome', 'role'];
+    if (selectedRole === 'disabled') {
+      slides.push('disability');
+    }
+    slides.push('camera', 'calibration', 'accessibility', 'done');
+    return slides;
+  };
+
+  const activeSlides = getActiveSlides();
+  const currentSlideKey = activeSlides[currentSlideIndex];
 
   const toggleDisability = (id: string) => {
     setSelectedDisabilities((prev) =>
@@ -73,34 +88,40 @@ export default function OnboardingScreen() {
     );
   };
 
-  const handleNext = () => {
-    // Skip disability slide if not disabled user
-    if (currentSlide === 1 && selectedRole !== 'disabled') {
-      setCurrentSlide(3); // Jump to accessibility slide
-      return;
+  const requestCameraPermission = async () => {
+    const { status } = await Camera.requestCameraPermissionsAsync();
+    setHasCameraPermission(status === 'granted');
+  };
+
+  const handleNext = async () => {
+    // If transitioning past the Camera slide, auto-request permission if not prompted yet
+    if (currentSlideKey === 'camera' && hasCameraPermission === null) {
+      await requestCameraPermission();
     }
-    // Always go to next slide
-    if (currentSlide < SLIDES.length - 1) {
-      setCurrentSlide(currentSlide + 1);
+
+    if (currentSlideIndex < activeSlides.length - 1) {
+      setCurrentSlideIndex(currentSlideIndex + 1);
     }
   };
 
   const handleBack = () => {
-    if (currentSlide === 3 && selectedRole !== 'disabled') {
-      setCurrentSlide(1);
-      return;
+    if (currentSlideIndex > 0) {
+      setCurrentSlideIndex(currentSlideIndex - 1);
     }
-    if (currentSlide > 0) setCurrentSlide(currentSlide - 1);
   };
 
   const handleFinish = async () => {
-    await AsyncStorage.setItem('userRole', selectedRole);
-    await AsyncStorage.setItem('disabilities', JSON.stringify(selectedDisabilities));
-    await AsyncStorage.setItem('voiceGuidance', JSON.stringify(voiceGuidance));
-    await AsyncStorage.setItem('largeText', JSON.stringify(largeText));
-    await AsyncStorage.setItem('highContrast', JSON.stringify(highContrast));
-    await AsyncStorage.setItem('onboardingComplete', 'true');
-    router.replace('/');
+    try {
+      await AsyncStorage.setItem('userRole', selectedRole);
+      await AsyncStorage.setItem('disabilities', JSON.stringify(selectedDisabilities));
+      await AsyncStorage.setItem('voiceGuidance', JSON.stringify(voiceGuidance));
+      await AsyncStorage.setItem('largeText', JSON.stringify(largeText));
+      await AsyncStorage.setItem('highContrast', JSON.stringify(highContrast));
+      await AsyncStorage.setItem('onboardingComplete', 'true');
+      router.replace('/');
+    } catch (e) {
+      console.error('Failed to save onboarding data', e);
+    }
   };
 
   // ─── Slide 0: Welcome ───────────────────────────────────────────────────────
@@ -171,28 +192,31 @@ export default function OnboardingScreen() {
         Select all that apply — the app will adapt to your needs
       </Text>
       <View style={styles.disabilityGrid}>
-        {DISABILITY_TYPES.map((type) => (
-          <TouchableOpacity
-            key={type.id}
-            style={[
-              styles.disabilityChip,
-              selectedDisabilities.includes(type.id) && styles.disabilityChipActive,
-            ]}
-            onPress={() => toggleDisability(type.id)}
-          >
-            <Ionicons
-              name={type.icon as any}
-              size={24}
-              color={selectedDisabilities.includes(type.id) ? '#0a0a0a' : '#00d4aa'}
-            />
-            <Text style={[
-              styles.disabilityLabel,
-              selectedDisabilities.includes(type.id) && styles.disabilityLabelActive,
-            ]}>
-              {type.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {DISABILITY_TYPES.map((type) => {
+          const isSelected = selectedDisabilities.includes(type.id);
+          return (
+            <TouchableOpacity
+              key={type.id}
+              style={[
+                styles.disabilityChip,
+                isSelected && styles.disabilityChipActive,
+              ]}
+              onPress={() => toggleDisability(type.id)}
+            >
+              <Ionicons
+                name={type.icon as any}
+                size={24}
+                color={isSelected ? '#0a0a0a' : '#00d4aa'}
+              />
+              <Text style={[
+                styles.disabilityLabel,
+                isSelected && styles.disabilityLabelActive,
+              ]}>
+                {type.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
       <View style={styles.infoBox}>
         <Ionicons name="information-circle" size={20} color="#00bfff" />
@@ -203,7 +227,69 @@ export default function OnboardingScreen() {
     </View>
   );
 
-  // ─── Slide 3: Accessibility Settings ────────────────────────────────────────
+  // ─── Slide 3: Camera Setup (NEW!) ───────────────────────────────────────────
+  const CameraSlide = () => (
+    <View style={styles.slideContainer}>
+      <Text style={styles.slideTitle}>Enable Camera Access</Text>
+      <Text style={styles.slideSubtitle}>
+        PhysioVision AI tracks and analyzes your skeletal movements locally on your device to guide your form.
+      </Text>
+      <View style={styles.permissionVisualCard}>
+        <View style={styles.scanLine} />
+        <Ionicons name="videocam" size={60} color="#00d4aa" />
+        <Text style={styles.privacyHighlight}>
+          🔒 Private & Secure: Video frames are processed locally and never uploaded to any servers.
+        </Text>
+      </View>
+
+      <TouchableOpacity 
+        style={[
+          styles.permissionButton, 
+          hasCameraPermission === true && styles.permissionButtonActive
+        ]} 
+        onPress={requestCameraPermission}
+      >
+        <Ionicons 
+          name={hasCameraPermission === true ? "checkmark-circle" : "camera"} 
+          size={22} 
+          color="#0a0a0a" 
+        />
+        <Text style={styles.permissionButtonText}>
+          {hasCameraPermission === true ? "Camera Access Granted" : "Allow Camera Permission"}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+
+  // ─── Slide 4: Space Prep & Calibration (NEW!) ──────────────────────────────
+  const CalibrationSlide = () => (
+    <View style={styles.slideContainer}>
+      <Text style={styles.slideTitle}>Setting Up Your Space</Text>
+      <Text style={styles.slideSubtitle}>
+        For the AI computer vision system to work flawlessly, ensure your physical setup matches these guidelines:
+      </Text>
+
+      <View style={styles.calibList}>
+        {[
+          { icon: 'phone-portrait-outline', title: 'Device Placement', desc: 'Prop your iPhone up vertically at hip height on a stable surface.' },
+          { icon: 'resize-outline', title: 'Step Back', desc: 'Stand 6 to 8 feet away so your entire body is visible from head to toe.' },
+          { icon: 'sunny-outline', title: 'Bright Lighting', desc: 'Avoid standing directly in front of bright windows (backlighting) so the AI can see you.' },
+        ].map((item, idx) => (
+          <View key={idx} style={styles.calibRow}>
+            <View style={styles.calibIconWrapper}>
+              <Ionicons name={item.icon as any} size={24} color="#00d4aa" />
+            </View>
+            <View style={styles.calibTextWrapper}>
+              <Text style={styles.calibItemTitle}>{item.title}</Text>
+              <Text style={styles.calibItemDesc}>{item.desc}</Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+
+  // ─── Slide 5: Accessibility Settings ────────────────────────────────────────
   const AccessibilitySlide = () => (
     <View style={styles.slideContainer}>
       <Text style={styles.slideTitle}>Accessibility Settings</Text>
@@ -259,7 +345,7 @@ export default function OnboardingScreen() {
     </View>
   );
 
-  // ─── Slide 4: Done ──────────────────────────────────────────────────────────
+  // ─── Slide 6: Done ──────────────────────────────────────────────────────────
   const DoneSlide = () => (
     <View style={styles.slideContainer}>
       <View style={styles.doneIconBox}>
@@ -295,50 +381,71 @@ export default function OnboardingScreen() {
     </View>
   );
 
-  const slides = [WelcomeSlide, RoleSlide, DisabilitySlide, AccessibilitySlide, DoneSlide];
-  const CurrentSlide = slides[currentSlide];
+  // Mapping string screen keys to components
+  const renderSlideContent = () => {
+    switch (currentSlideKey) {
+      case 'welcome': return <WelcomeSlide />;
+      case 'role': return <RoleSlide />;
+      case 'disability': return <DisabilitySlide />;
+      case 'camera': return <CameraSlide />;
+      case 'calibration': return <CalibrationSlide />;
+      case 'accessibility': return <AccessibilitySlide />;
+      case 'done': return <DoneSlide />;
+      default: return <WelcomeSlide />;
+    }
+  };
 
   return (
     <View style={styles.container}>
-      {/* Progress Dots */}
+      {/* Dynamic Progress Dots */}
       <View style={styles.progressDots}>
-        {[0, 1, 3, 4].map((_, i) => (
+        {activeSlides.map((_, i) => (
           <View
             key={i}
-            style={[styles.dot, currentSlide >= i && styles.dotActive]}
+            style={[
+              styles.dot, 
+              currentSlideIndex === i && styles.dotActive,
+              currentSlideIndex > i && styles.dotPassed
+            ]}
           />
         ))}
       </View>
 
-      {/* Slide Content */}
+      {/* Dynamic Slide Content Render */}
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        <CurrentSlide />
+        {renderSlideContent()}
       </ScrollView>
 
-      {/* Navigation Buttons */}
+      {/* Navigation Footer */}
       <View style={styles.navButtons}>
-        {currentSlide > 0 && (
+        {currentSlideIndex > 0 && (
           <TouchableOpacity style={styles.backButton} onPress={handleBack}>
             <Ionicons name="arrow-back" size={20} color="#888" />
             <Text style={styles.backButtonText}>Back</Text>
           </TouchableOpacity>
         )}
+        
         <View style={{ flex: 1 }} />
-        {currentSlide < SLIDES.length - 1 ? (
+        
+        {currentSlideIndex < activeSlides.length - 1 ? (
           <TouchableOpacity
             style={[
               styles.nextButton,
-              currentSlide === 1 && !selectedRole && styles.nextButtonDisabled,
+              currentSlideKey === 'role' && !selectedRole && styles.nextButtonDisabled,
+              currentSlideKey === 'camera' && !hasCameraPermission && styles.nextButtonDisabled,
             ]}
             onPress={handleNext}
-            disabled={currentSlide === 1 && !selectedRole}
+            disabled={
+              (currentSlideKey === 'role' && !selectedRole) ||
+              (currentSlideKey === 'camera' && !hasCameraPermission)
+            }
           >
             <Text style={styles.nextButtonText}>
-              {currentSlide === 0 ? 'Get Started' : 'Next'}
+              {currentSlideIndex === 0 ? 'Get Started' : 'Next'}
             </Text>
             <Ionicons name="arrow-forward" size={20} color="#0a0a0a" />
           </TouchableOpacity>
@@ -355,9 +462,16 @@ export default function OnboardingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
-  progressDots: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingTop: 60, paddingBottom: 10 },
+  progressDots: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    gap: 6, 
+    paddingTop: Platform.OS === 'ios' ? 60 : 40, 
+    paddingBottom: 10 
+  },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#333' },
   dotActive: { backgroundColor: '#00d4aa', width: 24 },
+  dotPassed: { backgroundColor: '#00d4aa88' },
   scrollView: { flex: 1 },
   scrollContent: { paddingHorizontal: 24, paddingBottom: 20 },
   slideContainer: { flex: 1, paddingTop: 20 },
@@ -395,11 +509,61 @@ const styles = StyleSheet.create({
   summaryTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
   summaryRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   summaryText: { color: '#aaa', fontSize: 14 },
-  navButtons: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 24, paddingVertical: 20, paddingBottom: 40 },
+  navButtons: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingHorizontal: 24, 
+    paddingVertical: 20, 
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20 
+  },
   backButton: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   backButtonText: { color: '#888', fontSize: 16 },
   nextButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00d4aa', borderRadius: 14, paddingHorizontal: 24, paddingVertical: 14, gap: 8 },
-  nextButtonDisabled: { backgroundColor: '#333' },
+  nextButtonDisabled: { backgroundColor: '#222', opacity: 0.5 },
   nextButtonText: { color: '#0a0a0a', fontSize: 16, fontWeight: 'bold' },
   finishButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00d4aa', borderRadius: 14, paddingHorizontal: 24, paddingVertical: 14, gap: 8 },
+  
+  // Custom slide elements:
+  permissionVisualCard: { 
+    height: 180, 
+    backgroundColor: '#111', 
+    borderRadius: 16, 
+    borderColor: '#222', 
+    borderWidth: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginVertical: 20, 
+    padding: 20, 
+    overflow: 'hidden' 
+  },
+  scanLine: { 
+    position: 'absolute', 
+    top: '50%', 
+    left: 0, 
+    right: 0, 
+    height: 2, 
+    backgroundColor: '#00d4aa', 
+    shadowColor: '#00d4aa', 
+    shadowOpacity: 0.5, 
+    shadowRadius: 5 
+  },
+  privacyHighlight: { color: '#888', fontSize: 12, textAlign: 'center', marginTop: 15 },
+  permissionButton: { 
+    flexDirection: 'row', 
+    backgroundColor: '#00d4aa', 
+    padding: 16, 
+    borderRadius: 14, 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: 8, 
+    marginTop: 10 
+  },
+  permissionButtonActive: { backgroundColor: '#a855f7' }, // Distinct visual reward
+  permissionButtonText: { color: '#0a0a0a', fontWeight: 'bold', fontSize: 16 },
+  calibList: { gap: 20, marginTop: 10 },
+  calibRow: { flexDirection: 'row', gap: 16, backgroundColor: '#1a1a1a', borderRadius: 16, padding: 16, borderLeftWidth: 3, borderLeftColor: '#00d4aa' },
+  calibIconWrapper: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#00d4aa15', alignItems: 'center', justifyContent: 'center' },
+  calibTextWrapper: { flex: 1 },
+  calibItemTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', marginBottom: 4 },
+  calibItemDesc: { color: '#888', fontSize: 13, lineHeight: 18 },
 });

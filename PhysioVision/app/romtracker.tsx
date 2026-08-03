@@ -1,11 +1,13 @@
-import { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
+import { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
 
-const ROM_DATA = {
+// 1. Core Structure with your exact configurations and colors
+const STATIC_ROM_DATA = {
   knee: {
     label: 'Knee Flexion',
     color: '#00d4aa',
@@ -68,24 +70,110 @@ const ROM_DATA = {
   },
 };
 
-type JointKey = keyof typeof ROM_DATA;
+type JointKey = keyof typeof STATIC_ROM_DATA;
 
 export default function ROMTrackerScreen() {
   const [selectedJoint, setSelectedJoint] = useState<JointKey>('knee');
+  const [romData, setRomData] = useState(STATIC_ROM_DATA);
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
-  const data = ROM_DATA[selectedJoint];
-  const latest = data.sessions[data.sessions.length - 1];
-  const first = data.sessions[0];
-  const improvement = latest.angle - first.angle;
+
+  useEffect(() => {
+    fetchLiveSessions();
+  }, []);
+
+  const fetchLiveSessions = async () => {
+    try {
+      setLoading(true);
+      const stored = await AsyncStorage.getItem('physio_sessions');
+      if (stored) {
+        const rawSessions = JSON.parse(stored);
+        
+        if (rawSessions && rawSessions.length > 0) {
+          // Clone the default dataset structure to avoid mutating original states
+          const baseData = JSON.parse(JSON.stringify(STATIC_ROM_DATA));
+
+          // Clear mock data if there are active user logs to prevent cluttering
+          baseData.knee.sessions = [];
+          baseData.elbow.sessions = [];
+          baseData.shoulder.sessions = [];
+          baseData.hip.sessions = [];
+
+          rawSessions.forEach((session: any) => {
+            const dateObj = new Date(session.timestamp || session.date || Date.now());
+            const formattedDate = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+            // Calculate degrees: Use captured range limit or fall back to score scaling
+            const score = session.formScore || session.accuracy || 75;
+            let angle = session.maxAngle || session.angle;
+
+            const exerciseKey = (session.exerciseName || '').toLowerCase();
+
+            // 2. Classify your PhysioVision AI movement routines into their target joints
+            if (exerciseKey.includes('squat') || exerciseKey.includes('lunge')) {
+              if (!angle) angle = Math.round((score / 100) * baseData.knee.normalRange.max);
+              baseData.knee.sessions.push({ date: formattedDate, angle, score });
+            } else if (exerciseKey.includes('curl') || exerciseKey.includes('elbow')) {
+              if (!angle) angle = Math.round((score / 100) * baseData.elbow.normalRange.max);
+              baseData.elbow.sessions.push({ date: formattedDate, angle, score });
+            } else if (exerciseKey.includes('shoulder') || exerciseKey.includes('press') || exerciseKey.includes('raising')) {
+              if (!angle) angle = Math.round((score / 100) * baseData.shoulder.normalRange.max);
+              baseData.shoulder.sessions.push({ date: formattedDate, angle, score });
+            } else if (exerciseKey.includes('hip') || exerciseKey.includes('leg')) {
+              if (!angle) angle = Math.round((score / 100) * baseData.hip.normalRange.max);
+              baseData.hip.sessions.push({ date: formattedDate, angle, score });
+            }
+          });
+
+          // Fill back missing datasets with defaults if a specific joint has zero tracking entries yet
+          (Object.keys(baseData) as JointKey[]).forEach((key) => {
+            if (baseData[key].sessions.length === 0) {
+              baseData[key].sessions = STATIC_ROM_DATA[key].sessions;
+            } else {
+              // Ensure our sessions chronological order matches historical flows (Oldest -> Newest)
+              baseData[key].sessions.sort((a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime());
+              // Cap at latest 7 sessions to fit comfortably inside your layout charts
+              if (baseData[key].sessions.length > 7) {
+                baseData[key].sessions = baseData[key].sessions.slice(-7);
+              }
+            }
+          });
+
+          setRomData(baseData);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not retrieve real-time ROM data from AsyncStorage, using mock records.", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const data = romData[selectedJoint];
+  
+  // Guard values in case of empty states
+  const latest = data.sessions[data.sessions.length - 1] || { angle: 0, score: 0, date: 'N/A' };
+  const first = data.sessions[0] || { angle: 0, score: 0, date: 'N/A' };
+  const improvement = Math.max(0, latest.angle - first.angle);
   const maxAngle = data.normalRange.max;
 
-  const getBarHeight = (angle: number) => (angle / maxAngle) * 120;
+  const getBarHeight = (angle: number) => {
+    return maxAngle > 0 ? (angle / maxAngle) * 120 : 0;
+  };
 
   const getScoreColor = (score: number) => {
     if (score >= 90) return '#2ed573';
     if (score >= 75) return '#ffd700';
     return '#ff4757';
   };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#00d4aa" />
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -98,7 +186,9 @@ export default function ROMTrackerScreen() {
           <Text style={styles.headerTitle}>ROM Tracker</Text>
           <Text style={styles.headerSubtitle}>Range of Motion Progress</Text>
         </View>
-        <Ionicons name="trending-up" size={24} color="#00d4aa" />
+        <TouchableOpacity onPress={fetchLiveSessions}>
+          <Ionicons name="refresh" size={24} color="#00d4aa" />
+        </TouchableOpacity>
       </View>
 
       {/* Joint Selector */}
@@ -108,12 +198,12 @@ export default function ROMTrackerScreen() {
         style={styles.jointScroll}
         contentContainerStyle={styles.jointScrollContent}
       >
-        {(Object.keys(ROM_DATA) as JointKey[]).map((joint) => (
+        {(Object.keys(romData) as JointKey[]).map((joint) => (
           <TouchableOpacity
             key={joint}
             style={[
               styles.jointChip,
-              selectedJoint === joint && { backgroundColor: ROM_DATA[joint].color },
+              selectedJoint === joint && { backgroundColor: romData[joint].color },
             ]}
             onPress={() => setSelectedJoint(joint)}
           >
@@ -121,7 +211,7 @@ export default function ROMTrackerScreen() {
               styles.jointChipText,
               selectedJoint === joint && { color: '#0a0a0a', fontWeight: 'bold' },
             ]}>
-              {ROM_DATA[joint].label}
+              {romData[joint].label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -151,7 +241,7 @@ export default function ROMTrackerScreen() {
         <View style={styles.progressHeader}>
           <Text style={styles.progressTitle}>Progress to Normal Range</Text>
           <Text style={styles.progressPercent}>
-            {Math.round((latest.angle / maxAngle) * 100)}%
+            {maxAngle > 0 ? Math.round((latest.angle / maxAngle) * 100) : 0}%
           </Text>
         </View>
         <View style={styles.progressBarBg}>
@@ -159,7 +249,7 @@ export default function ROMTrackerScreen() {
             style={[
               styles.progressBarFill,
               {
-                width: `${Math.min((latest.angle / maxAngle) * 100, 100)}%`,
+                width: `${Math.min((maxAngle > 0 ? (latest.angle / maxAngle) * 100 : 0), 100)}%`,
                 backgroundColor: data.color,
               },
             ]}
@@ -186,7 +276,8 @@ export default function ROMTrackerScreen() {
                   ]}
                 />
               </View>
-              <Text style={styles.barDate}>{session.date.split(' ')[1]}</Text>
+              {/* Handles date formatting cleanly */}
+              <Text style={styles.barDate}>{session.date.includes(' ') ? session.date.split(' ')[1] : session.date}</Text>
             </View>
           ))}
         </View>
@@ -216,7 +307,7 @@ export default function ROMTrackerScreen() {
                   ]}
                 />
               </View>
-              <Text style={styles.barDate}>{session.date.split(' ')[1]}</Text>
+              <Text style={styles.barDate}>{session.date.includes(' ') ? session.date.split(' ')[1] : session.date}</Text>
             </View>
           ))}
         </View>
@@ -245,7 +336,7 @@ export default function ROMTrackerScreen() {
                 style={[
                   styles.sessionBarFill,
                   {
-                    width: `${(session.angle / maxAngle) * 100}%`,
+                    width: `${maxAngle > 0 ? (session.angle / maxAngle) * 100 : 0}%`,
                     backgroundColor: data.color + '66',
                   },
                 ]}
