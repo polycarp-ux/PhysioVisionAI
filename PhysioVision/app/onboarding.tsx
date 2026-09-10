@@ -6,7 +6,6 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Camera } from 'expo-camera'; // Make sure to install: npx expo install expo-camera
 
 const { width } = Dimensions.get('window');
 
@@ -64,7 +63,6 @@ export default function OnboardingScreen() {
   const [voiceGuidance, setVoiceGuidance] = useState(false);
   const [largeText, setLargeText] = useState(false);
   const [highContrast, setHighContrast] = useState(false);
-  const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   
   const router = useRouter();
 
@@ -75,7 +73,7 @@ export default function OnboardingScreen() {
     if (selectedRole === 'disabled') {
       slides.push('disability');
     }
-    slides.push('camera', 'calibration', 'accessibility', 'done');
+    slides.push('calibration', 'accessibility', 'done');
     return slides;
   };
 
@@ -88,17 +86,7 @@ export default function OnboardingScreen() {
     );
   };
 
-  const requestCameraPermission = async () => {
-    const { status } = await Camera.requestCameraPermissionsAsync();
-    setHasCameraPermission(status === 'granted');
-  };
-
   const handleNext = async () => {
-    // If transitioning past the Camera slide, auto-request permission if not prompted yet
-    if (currentSlideKey === 'camera' && hasCameraPermission === null) {
-      await requestCameraPermission();
-    }
-
     if (currentSlideIndex < activeSlides.length - 1) {
       setCurrentSlideIndex(currentSlideIndex + 1);
     }
@@ -113,6 +101,7 @@ export default function OnboardingScreen() {
   const handleFinish = async () => {
     try {
       await AsyncStorage.setItem('userRole', selectedRole);
+      await AsyncStorage.setItem('userCategory', selectedRole);
       await AsyncStorage.setItem('disabilities', JSON.stringify(selectedDisabilities));
       await AsyncStorage.setItem('voiceGuidance', JSON.stringify(voiceGuidance));
       await AsyncStorage.setItem('largeText', JSON.stringify(largeText));
@@ -227,41 +216,7 @@ export default function OnboardingScreen() {
     </View>
   );
 
-  // ─── Slide 3: Camera Setup (NEW!) ───────────────────────────────────────────
-  const CameraSlide = () => (
-    <View style={styles.slideContainer}>
-      <Text style={styles.slideTitle}>Enable Camera Access</Text>
-      <Text style={styles.slideSubtitle}>
-        PhysioVision AI tracks and analyzes your skeletal movements locally on your device to guide your form.
-      </Text>
-      <View style={styles.permissionVisualCard}>
-        <View style={styles.scanLine} />
-        <Ionicons name="videocam" size={60} color="#00d4aa" />
-        <Text style={styles.privacyHighlight}>
-          🔒 Private & Secure: Video frames are processed locally and never uploaded to any servers.
-        </Text>
-      </View>
-
-      <TouchableOpacity 
-        style={[
-          styles.permissionButton, 
-          hasCameraPermission === true && styles.permissionButtonActive
-        ]} 
-        onPress={requestCameraPermission}
-      >
-        <Ionicons 
-          name={hasCameraPermission === true ? "checkmark-circle" : "camera"} 
-          size={22} 
-          color="#0a0a0a" 
-        />
-        <Text style={styles.permissionButtonText}>
-          {hasCameraPermission === true ? "Camera Access Granted" : "Allow Camera Permission"}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
-
-  // ─── Slide 4: Space Prep & Calibration (NEW!) ──────────────────────────────
+  // ─── Space Prep & Calibration ─────────────────────────────────────────────
   const CalibrationSlide = () => (
     <View style={styles.slideContainer}>
       <Text style={styles.slideTitle}>Setting Up Your Space</Text>
@@ -387,7 +342,6 @@ export default function OnboardingScreen() {
       case 'welcome': return <WelcomeSlide />;
       case 'role': return <RoleSlide />;
       case 'disability': return <DisabilitySlide />;
-      case 'camera': return <CameraSlide />;
       case 'calibration': return <CalibrationSlide />;
       case 'accessibility': return <AccessibilitySlide />;
       case 'done': return <DoneSlide />;
@@ -436,13 +390,9 @@ export default function OnboardingScreen() {
             style={[
               styles.nextButton,
               currentSlideKey === 'role' && !selectedRole && styles.nextButtonDisabled,
-              currentSlideKey === 'camera' && !hasCameraPermission && styles.nextButtonDisabled,
             ]}
             onPress={handleNext}
-            disabled={
-              (currentSlideKey === 'role' && !selectedRole) ||
-              (currentSlideKey === 'camera' && !hasCameraPermission)
-            }
+            disabled={currentSlideKey === 'role' && !selectedRole}
           >
             <Text style={styles.nextButtonText}>
               {currentSlideIndex === 0 ? 'Get Started' : 'Next'}

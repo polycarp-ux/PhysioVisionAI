@@ -1,12 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ProfileScreen() {
-  const [name, setName] = useState('Polycarp Gerrard');
-  const [age, setAge] = useState('22');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [age, setAge] = useState('');
   const [goal, setGoal] = useState('General Fitness');
+  const [role, setRole] = useState('patient');
+  const [disabilities, setDisabilities] = useState<string[]>([]);
   const [voiceAlerts, setVoiceAlerts] = useState(true);
   const [colorOverlay, setColorOverlay] = useState(true);
   const [editMode, setEditMode] = useState(false);
@@ -22,6 +26,22 @@ export default function ProfileScreen() {
   ];
 
   const [injuries, setInjuries] = useState<string[]>([]);
+
+  useEffect(() => {
+    const loadUserProfile = async () => {
+      const [storedUser, storedRole, storedDisabilities] = await Promise.all([
+        AsyncStorage.getItem('demo_auth_user'),
+        AsyncStorage.getItem('userRole'),
+        AsyncStorage.getItem('disabilities'),
+      ]);
+      const user = storedUser ? JSON.parse(storedUser) : null;
+      setName(user?.display_name || user?.email?.split('@')[0] || 'User');
+      setEmail(user?.email || '');
+      setRole(storedRole || 'patient');
+      setDisabilities(storedDisabilities ? JSON.parse(storedDisabilities) : []);
+    };
+    void loadUserProfile();
+  }, []);
 
   const toggleInjury = (id: string) => {
     setInjuries((prev) =>
@@ -48,7 +68,8 @@ export default function ProfileScreen() {
           <Ionicons name="person" size={48} color="#00d4aa" />
         </View>
         <Text style={styles.avatarName}>{name}</Text>
-        <Text style={styles.avatarGoal}>{goal}</Text>
+        <Text style={styles.avatarGoal}>{email}</Text>
+        <Text style={styles.avatarRole}>{role} • {goal}</Text>
       </View>
 
       {/* Personal Info */}
@@ -80,6 +101,25 @@ export default function ProfileScreen() {
             keyboardType="numeric"
             placeholderTextColor="#888"
           />
+        </View>
+        <View style={styles.inputCard}>
+          <View style={styles.inputRow}>
+            <Ionicons name="mail-outline" size={20} color="#00d4aa" />
+            <Text style={styles.inputLabel}>Signed-in Email</Text>
+          </View>
+          <Text style={styles.accountValue}>{email || 'Not available'}</Text>
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Personalised Profile</Text>
+        <View style={styles.profileCard}>
+          <Text style={styles.profileLabel}>Role</Text>
+          <Text style={styles.profileValue}>{role}</Text>
+          <Text style={styles.profileLabel}>Accessibility needs</Text>
+          <Text style={styles.profileValue}>
+            {disabilities.length ? disabilities.join(', ') : 'None selected'}
+          </Text>
         </View>
       </View>
 
@@ -186,6 +226,7 @@ const styles = StyleSheet.create({
   avatarCircle: { width: 90, height: 90, borderRadius: 45, backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: '#00d4aa', marginBottom: 12 },
   avatarName: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
   avatarGoal: { color: '#00d4aa', fontSize: 14, marginTop: 4 },
+  avatarRole: { color: '#888', fontSize: 13, marginTop: 4, textTransform: 'capitalize' },
   section: { marginBottom: 24 },
   sectionTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
   sectionSub: { color: '#888', fontSize: 13, marginBottom: 12, marginTop: -8 },
@@ -193,6 +234,10 @@ const styles = StyleSheet.create({
   inputRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   inputLabel: { color: '#888', fontSize: 13 },
   input: { color: '#fff', fontSize: 16, borderBottomWidth: 1, borderBottomColor: '#00d4aa', paddingVertical: 6 },
+  accountValue: { color: '#ddd', fontSize: 16, paddingVertical: 6 },
+  profileCard: { backgroundColor: '#17211f', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#00d4aa55' },
+  profileLabel: { color: '#00d4aa', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginTop: 8 },
+  profileValue: { color: '#ddd', fontSize: 15, marginTop: 4, textTransform: 'capitalize' },
   inputDisabled: { borderBottomColor: '#333', color: '#aaa' },
   goalsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   goalChip: { backgroundColor: '#1a1a1a', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, borderWidth: 1, borderColor: '#333' },

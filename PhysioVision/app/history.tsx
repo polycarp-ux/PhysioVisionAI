@@ -1,9 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useIsFocused } from '@react-navigation/native';
-
+import { useFocusEffect } from 'expo-router';
+import { getExerciseSessions, getStoredUser } from '../utils/api';
 interface WorkoutSession {
   id: string;
   exerciseId: string;
@@ -17,80 +24,109 @@ interface WorkoutSession {
 export default function HistoryScreen() {
   const [sessions, setSessions] = useState<WorkoutSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const isFocused = useIsFocused(); // Automatically refreshes data when clicking onto this tab
-
-  // Aggregate Metrics State
   const [totalReps, setTotalReps] = useState(0);
   const [totalMinutes, setTotalMinutes] = useState(0);
-  const [avgForm, setAvgForm] = useState(100);
+  const [avgForm, setAvgForm] = useState(0);
 
-  useEffect(() => {
-    if (isFocused) {
-      loadSessions();
-    }
-  }, [isFocused]);
-
-  const loadSessions = async () => {
-    try {
-      setLoading(true);
-      const data = await AsyncStorage.getItem('physio_sessions');
-      if (data) {
-        const parsedSessions: WorkoutSession[] = JSON.parse(data);
-        setSessions(parsedSessions);
-        calculateStats(parsedSessions);
-      } else {
-        setSessions([]);
-        calculateStats([]);
-      }
-    } catch (error) {
-      console.error('Failed to parse history data logs:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const calculateStats = (allSessions: WorkoutSession[]) => {
-    if (allSessions.length === 0) {
+  const calculateStats = (items: WorkoutSession[]) => {
+    if (items.length === 0) {
       setTotalReps(0);
       setTotalMinutes(0);
-      setAvgForm(100);
+      setAvgForm(0);
       return;
     }
 
-    let repsAccumulator = 0;
-    let secondsAccumulator = 0;
-    let formScoreAccumulator = 0;
+    const reps = items.reduce((total, item) => total + item.reps, 0);
+    const seconds = items.reduce((total, item) => total + item.duration, 0);
+    const form = items.reduce((total, item) => total + item.formScore, 0);
 
-    allSessions.forEach(s => {
-      repsAccumulator += s.reps;
-      secondsAccumulator += s.duration;
-      formScoreAccumulator += s.formScore;
-    });
-
-    setTotalReps(repsAccumulator);
-    setTotalMinutes(Math.round(secondsAccumulator / 60));
-    setAvgForm(Math.round(formScoreAccumulator / allSessions.length));
+    setTotalReps(reps);
+    setTotalMinutes(Math.round(seconds / 60));
+    setAvgForm(Math.round(form / items.length));
   };
 
-  const clearHistoryLog = async () => {
+  const loadSessions = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const user = await getStoredUser();
+      if (user?.uid) {
+        try {
+          const cloudSessions = await getExerciseSessions(user.uid);
+          const normalized = cloudSessions.map((session) => ({
+            id: session.id || `${session.exercise_id || 'session'}-${Date.now()}`,
+            exerciseId: session.exercise_id || 'exercise',
+            exerciseName: session.exercise_name || 'Exercise session',
+            reps: Number.isFinite(session.reps) ? session.reps : 0,
+            duration: Number.isFinite(session.duration_seconds) ? session.duration_seconds : 0,
+            formScore: Number.isFinite(session.accuracy_score) ? session.accuracy_score : 0,
+            date: session.created_at
+              ? new Date(session.created_at).toLocaleDateString('en-GB')
+              : 'Recently',
+          }));
+          setSessions(normalized);
+          calculateStats(normalized);
+          return;
+        } catch (cloudError) {
+          console.warn('Cloud history unavailable; showing local history.', cloudError);
+        }
+      }
+
+      const storedData = await AsyncStorage.getItem('physio_sessions');
+
+      if (!storedData) {
+        setSessions([]);
+        calculateStats([]);
+        return;
+      }
+
+      const parsedSessions: WorkoutSession[] = JSON.parse(storedData);
+
+      setSessions(parsedSessions);
+      calculateStats(parsedSessions);
+    } catch (error) {
+      console.error('Failed to load session history:', error);
+      setSessions([]);
+      calculateStats([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  async function clearHistory() {
     try {
       await AsyncStorage.removeItem('physio_sessions');
       setSessions([]);
       calculateStats([]);
     } catch (error) {
-      console.error('Error clearing data logs:', error);
+      console.error('Failed to clear session history:', error);
     }
-  };
+  }
 
-  const formatDuration = (totalSeconds: number) => {
-    const mins = Math.floor(totalSeconds / 60);
-    const secs = totalSeconds % 60;
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  };
+  function confirmClear() {
+    clearHistory();
+  }
+
+  function formatDuration(seconds: number) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+
+    if (minutes > 0) {
+      return `${minutes}m ${remainingSeconds}s`;
+    }
+
+    return `${remainingSeconds}s`;
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadSessions();
+    }, [loadSessions])
+  );
 
   if (loading) {
     return (
-      <View style={[styles.container, { justifyContent: 'center' }]}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#00d4aa" />
       </View>
     );
@@ -98,39 +134,51 @@ export default function HistoryScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header section with wipe action button */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Therapy History</Text>
+        <Text style={styles.headerTitle}>Session History</Text>
+
         {sessions.length > 0 && (
-          <TouchableOpacity onPress={clearHistoryLog} style={styles.clearBtn}>
+          <TouchableOpacity
+            onPress={confirmClear}
+            style={styles.clearButton}
+          >
             <Ionicons name="trash-outline" size={16} color="#ff4757" />
-            <Text style={styles.clearBtnText}>Clear</Text>
+            <Text style={styles.clearButtonText}>Clear</Text>
           </TouchableOpacity>
         )}
       </View>
 
-      {/* Aggregate Performance Cards Layout Panel */}
-      <View style={styles.metricsPanel}>
+      <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
-          <Text style={styles.metricVal}>{totalReps}</Text>
-          <Text style={styles.metricLbl}>TOTAL REPS</Text>
+          <Text style={styles.metricValue}>{totalReps}</Text>
+          <Text style={styles.metricLabel}>TOTAL REPS</Text>
         </View>
+
         <View style={styles.metricCard}>
-          <Text style={styles.metricVal}>{totalMinutes}m</Text>
-          <Text style={styles.metricLbl}>ACTIVE TIME</Text>
+          <Text style={styles.metricValue}>{totalMinutes}m</Text>
+          <Text style={styles.metricLabel}>ACTIVE TIME</Text>
         </View>
+
         <View style={styles.metricCard}>
-          <Text style={[styles.metricVal, { color: avgForm >= 80 ? '#00d4aa' : '#ff6b35' }]}>{avgForm}%</Text>
-          <Text style={styles.metricLbl}>AVG FORM</Text>
+          <Text
+            style={[
+              styles.metricValue,
+              { color: avgForm >= 80 ? '#00d4aa' : '#ff6b35' },
+            ]}
+          >
+            {avgForm}%
+          </Text>
+          <Text style={styles.metricLabel}>AVG FORM</Text>
         </View>
       </View>
 
-      {/* Sessions Rendering List */}
       {sessions.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="calendar-outline" size={48} color="#444" />
-          <Text style={styles.emptyText}>No tracking profiles logged yet.</Text>
-          <Text style={styles.emptySubText}>Completed exercises from your Analysis panel show up here.</Text>
+          <Ionicons name="calendar-outline" size={52} color="#444" />
+          <Text style={styles.emptyTitle}>No sessions yet</Text>
+          <Text style={styles.emptyText}>
+            Completed exercises will appear here.
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -138,35 +186,54 @@ export default function HistoryScreen() {
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
-            const isExcellentForm = item.formScore >= 80;
+            const goodForm = item.formScore >= 80;
+
             return (
               <View style={styles.sessionCard}>
                 <View style={styles.cardHeader}>
-                  <View style={styles.exerciseTitleRow}>
-                    <Ionicons 
-                      name={item.exerciseId.includes('curl') || item.exerciseId.includes('press') ? "barbell-outline" : "body-outline"} 
-                      size={16} 
-                      color="#00d4aa" 
+                  <View style={styles.exerciseRow}>
+                    <Ionicons
+                      name={
+                        item.exerciseId.includes('curl') ||
+                        item.exerciseId.includes('press')
+                          ? 'barbell-outline'
+                          : 'body-outline'
+                      }
+                      size={18}
+                      color="#00d4aa"
                     />
-                    <Text style={styles.exerciseNameText}>{item.exerciseName}</Text>
+
+                    <Text style={styles.exerciseName}>
+                      {item.exerciseName}
+                    </Text>
                   </View>
-                  <Text style={styles.dateText}>{item.date}</Text>
+
+                  <Text style={styles.date}>{item.date}</Text>
                 </View>
 
-                <View style={styles.cardStatsRow}>
-                  <View style={styles.subStat}>
-                    <Text style={styles.subStatVal}>{item.reps}</Text>
-                    <Text style={styles.subStatLbl}>Reps Completed</Text>
+                <View style={styles.statsRow}>
+                  <View style={styles.stat}>
+                    <Text style={styles.statValue}>{item.reps}</Text>
+                    <Text style={styles.statLabel}>REPS</Text>
                   </View>
-                  <View style={styles.subStat}>
-                    <Text style={styles.subStatVal}>{formatDuration(item.duration)}</Text>
-                    <Text style={styles.subStatLbl}>Duration</Text>
+
+                  <View style={styles.stat}>
+                    <Text style={styles.statValue}>
+                      {formatDuration(item.duration)}
+                    </Text>
+                    <Text style={styles.statLabel}>DURATION</Text>
                   </View>
-                  <View style={[styles.subStat, styles.borderLeft]}>
-                    <Text style={[styles.subStatVal, { color: isExcellentForm ? '#00d4aa' : '#ff4757' }]}>
+
+                  <View style={[styles.stat, styles.divider]}>
+                    <Text
+                      style={[
+                        styles.statValue,
+                        { color: goodForm ? '#00d4aa' : '#ff4757' },
+                      ]}
+                    >
                       {item.formScore}%
                     </Text>
-                    <Text style={styles.subStatLbl}>Accuracy</Text>
+                    <Text style={styles.statLabel}>ACCURACY</Text>
                   </View>
                 </View>
               </View>
@@ -179,27 +246,141 @@ export default function HistoryScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0a', paddingTop: 60 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, marginBottom: 16 },
-  headerTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  clearBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: 8, borderRadius: 8, backgroundColor: 'rgba(255, 71, 87, 0.1)' },
-  clearBtnText: { color: '#ff4757', fontSize: 12, fontWeight: '600' },
-  metricsPanel: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, gap: 10, marginBottom: 20 },
-  metricCard: { flex: 1, backgroundColor: '#141414', borderRadius: 12, paddingVertical: 14, alignItems: 'center', borderWidth: 1, borderColor: '#222' },
-  metricVal: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  metricLbl: { color: '#888', fontSize: 9, fontWeight: '600', marginTop: 4, letterSpacing: 0.5 },
-  listContent: { paddingHorizontal: 20, paddingBottom: 40, gap: 12 },
-  sessionCard: { backgroundColor: '#141414', borderRadius: 12, padding: 14, borderWidth: 1, borderColor: '#222' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderColor: '#222', paddingBottom: 10, marginBottom: 12 },
-  exerciseTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  exerciseNameText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
-  dateText: { color: '#666', fontSize: 11 },
-  cardStatsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  subStat: { flex: 1, alignItems: 'flex-start' },
-  borderLeft: { borderLeftWidth: 1, borderColor: '#222', paddingLeft: 12, flex: 0.8 },
-  subStatVal: { color: '#fff', fontSize: 15, fontWeight: 'bold' },
-  subStatLbl: { color: '#666', fontSize: 10, marginTop: 2 },
-  emptyContainer: { flex: 0.7, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 40 },
-  emptyText: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginTop: 12 },
-  emptySubText: { color: '#666', fontSize: 12, textAlign: 'center', marginTop: 6, lineHeight: 16 }
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+    paddingTop: 60,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0a0a0a',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    marginBottom: 18,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold',
+  },
+  clearButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 71, 87, 0.12)',
+  },
+  clearButtonText: {
+    color: '#ff4757',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    marginBottom: 20,
+  },
+  metricCard: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 15,
+    borderRadius: 12,
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: '#252525',
+  },
+  metricValue: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  metricLabel: {
+    color: '#888',
+    fontSize: 9,
+    fontWeight: '600',
+    marginTop: 5,
+  },
+  listContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    gap: 12,
+  },
+  sessionCard: {
+    padding: 15,
+    borderRadius: 12,
+    backgroundColor: '#141414',
+    borderWidth: 1,
+    borderColor: '#252525',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 12,
+    marginBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#252525',
+  },
+  exerciseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  exerciseName: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  date: {
+    color: '#777',
+    fontSize: 11,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stat: {
+    flex: 1,
+  },
+  divider: {
+    paddingLeft: 14,
+    borderLeftWidth: 1,
+    borderLeftColor: '#252525',
+  },
+  statValue: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    color: '#777',
+    fontSize: 10,
+    marginTop: 3,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 35,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: 'bold',
+    marginTop: 14,
+  },
+  emptyText: {
+    color: '#777',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 7,
+  },
 });

@@ -24,6 +24,8 @@ const ELDERLY_EXERCISES = [
       'Hold for 2 seconds then sit back down',
     ],
     benefit: 'Improves leg strength and reduces fall risk',
+    backendId: 'sit_to_stand',
+    mode: 'elderly',
   },
   {
     id: 'heel_toe',
@@ -41,6 +43,8 @@ const ELDERLY_EXERCISES = [
       'Turn around slowly and repeat',
     ],
     benefit: 'Improves balance and prevents falls',
+    backendId: 'heel_toe',
+    mode: 'elderly',
   },
   {
     id: 'ankle_circles',
@@ -58,6 +62,8 @@ const ELDERLY_EXERCISES = [
       'Repeat with the left foot',
     ],
     benefit: 'Reduces ankle stiffness and improves circulation',
+    backendId: 'ankle_circles',
+    mode: 'elderly',
   },
   {
     id: 'wall_pushup',
@@ -75,6 +81,8 @@ const ELDERLY_EXERCISES = [
       'Repeat 10 times',
     ],
     benefit: 'Strengthens arms and chest safely',
+    backendId: 'wall_pushup',
+    mode: 'elderly',
   },
   {
     id: 'seated_march',
@@ -92,6 +100,8 @@ const ELDERLY_EXERCISES = [
       'Alternate for 20 repetitions',
     ],
     benefit: 'Improves circulation and leg strength',
+    backendId: 'seated_march',
+    mode: 'elderly',
   },
   {
     id: 'shoulder_rolls',
@@ -109,6 +119,8 @@ const ELDERLY_EXERCISES = [
       'Repeat 3 times',
     ],
     benefit: 'Reduces shoulder tension and improves posture',
+    backendId: 'shoulder_rolls',
+    mode: 'elderly',
   },
 ];
 
@@ -126,7 +138,6 @@ export default function ElderlyScreen() {
   const router = useRouter();
 
   useEffect(() => {
-    // Rotate tips every 5 seconds
     const interval = setInterval(() => {
       setCurrentTip((prev) => (prev + 1) % TIPS.length);
     }, 5000);
@@ -146,13 +157,21 @@ export default function ElderlyScreen() {
     Vibration.vibrate(100);
   };
 
+  // ── Fixed: now passes the correct exercise and mode to analysis ──
   const handleStartExercise = () => {
     if (selectedExercise) {
       Speech.speak(
         `Starting ${selectedExercise.name}. ${selectedExercise.steps[0]}`,
         { rate: 0.8 }
       );
-      router.push('/analysis');
+      router.push({
+        pathname: '/analysis',
+        params: {
+          exerciseId: selectedExercise.id,
+          exerciseName: selectedExercise.name,
+          mode: 'elderly',
+        },
+      });
     }
   };
 
@@ -243,6 +262,14 @@ export default function ElderlyScreen() {
             <Text style={styles.benefitText}>{selectedExercise.benefit}</Text>
           </View>
 
+          {/* AI Analysis Info Box */}
+          <View style={styles.aiInfoBox}>
+            <Ionicons name="scan" size={18} color="#00d4aa" />
+            <Text style={styles.aiInfoText}>
+              AI will analyse your <Text style={{ color: '#00d4aa', fontWeight: 'bold' }}>{selectedExercise.name}</Text> specifically — not general exercises
+            </Text>
+          </View>
+
           <Text style={styles.stepsTitle}>Step by Step Instructions:</Text>
           {selectedExercise.steps.map((step, i) => (
             <TouchableOpacity
@@ -263,7 +290,7 @@ export default function ElderlyScreen() {
             onPress={handleStartExercise}
           >
             <Ionicons name="videocam" size={24} color="#0a0a0a" />
-            <Text style={styles.startBtnText}>Start with AI Analysis</Text>
+            <Text style={styles.startBtnText}>Start AI Analysis for {selectedExercise.name}</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -317,15 +344,17 @@ const styles = StyleSheet.create({
   detailTitle: { color: '#fff', fontSize: 22, fontWeight: 'bold' },
   detailDuration: { color: '#888', fontSize: 14, marginTop: 2 },
   detailDescription: { color: '#aaa', fontSize: 16, lineHeight: 26, marginBottom: 16 },
-  benefitBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2ed57311', borderRadius: 12, padding: 14, gap: 10, marginBottom: 20, borderWidth: 1, borderColor: '#2ed57333' },
+  benefitBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2ed57311', borderRadius: 12, padding: 14, gap: 10, marginBottom: 12, borderWidth: 1, borderColor: '#2ed57333' },
   benefitText: { color: '#2ed573', fontSize: 15, flex: 1 },
+  aiInfoBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#00d4aa11', borderRadius: 12, padding: 14, gap: 10, marginBottom: 20, borderWidth: 1, borderColor: '#00d4aa33' },
+  aiInfoText: { color: '#aaa', fontSize: 13, flex: 1, lineHeight: 20 },
   stepsTitle: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginBottom: 14 },
   stepRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
   stepNumber: { width: 32, height: 32, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   stepNumberText: { color: '#0a0a0a', fontSize: 16, fontWeight: 'bold' },
   stepText: { flex: 1, color: '#ddd', fontSize: 16, lineHeight: 24 },
   startBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderRadius: 16, padding: 18, marginTop: 20, gap: 10 },
-  startBtnText: { color: '#0a0a0a', fontSize: 18, fontWeight: 'bold' },
+  startBtnText: { color: '#0a0a0a', fontSize: 16, fontWeight: 'bold' },
   safetyCard: { backgroundColor: '#1a1a1a', borderRadius: 16, padding: 20, marginBottom: 16, borderWidth: 1, borderColor: '#ffd70033' },
   safetyTitle: { color: '#ffd700', fontSize: 18, fontWeight: 'bold', marginBottom: 16 },
   guidelineRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 },

@@ -23,6 +23,7 @@ export default function HomeScreen() {
   const [largeText, setLargeText] = useState(false);
   const [highContrast, setHighContrast] = useState(false);
   const [userRole, setUserRole] = useState('patient');
+  const [disabilities, setDisabilities] = useState<string[]>([]);
 
   // Dynamic Dashboard Stats
   const [streak, setStreak] = useState(0);
@@ -54,10 +55,12 @@ export default function HomeScreen() {
           const savedLargeText = await AsyncStorage.getItem('largeText');
           const savedHighContrast = await AsyncStorage.getItem('highContrast');
           const savedRole = await AsyncStorage.getItem('userRole');
+          const savedDisabilities = await AsyncStorage.getItem('disabilities');
 
           setLargeText(savedLargeText ? JSON.parse(savedLargeText) : false);
           setHighContrast(savedHighContrast ? JSON.parse(savedHighContrast) : false);
           setUserRole(savedRole || 'patient');
+          setDisabilities(savedDisabilities ? JSON.parse(savedDisabilities) : []);
 
           const rawSessions = await AsyncStorage.getItem('physio_sessions');
           if (rawSessions) {
@@ -310,7 +313,7 @@ export default function HomeScreen() {
       {/* Care Modes Helper Panel */}
       <Text style={[styles.sectionTitle, largeText && { fontSize: 22 }]}>Care Modes</Text>
       <View style={styles.quickActions}>
-        <TouchableOpacity style={[styles.actionCard, { backgroundColor: theme.cardBackground }]} onPress={() => router.push('/elderly')}>
+        <TouchableOpacity style={[styles.actionCard, { backgroundColor: theme.cardBackground }]} onPress={() => router.push(userRole === 'elderly' ? '/elderly' : '/rehab')}>
           <Ionicons name="heart" size={largeText ? 32 : 28} color="#ff6b35" />
           <Text style={[styles.actionLabel, { color: theme.subTextColor }, largeText && { fontSize: 13 }]}>Elderly Mode</Text>
         </TouchableOpacity>

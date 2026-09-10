@@ -5,38 +5,36 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { View } from 'react-native';
 
+const AUTH_TOKEN_KEY = 'firebase_id_token';
+
 export default function RootLayout() {
-  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
+  const [ready, setReady] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    const check = async () => {
+    const checkUser = async () => {
       try {
-        const done = await AsyncStorage.getItem('onboardingComplete');
-        setOnboardingComplete(done === 'true');
-      } catch {
-        setOnboardingComplete(false);
+        await AsyncStorage.removeItem(AUTH_TOKEN_KEY);
+        router.replace('/auth');
+      } catch (error) {
+        console.error('Startup authentication check failed:', error);
+        router.replace('/auth');
+      } finally {
+        setReady(true);
       }
     };
-    check();
-  }, []);
 
-  useEffect(() => {
-    if (onboardingComplete === null) return;
-    
-    if (!onboardingComplete) {
-      // Force direct redirection to onboarding
-      router.replace('/onboarding');
-    }
-  }, [onboardingComplete]);
+    void checkUser();
+  }, [router]);
 
-  if (onboardingComplete === null) {
+  if (!ready) {
     return <View style={{ flex: 1, backgroundColor: '#0a0a0a' }} />;
   }
 
   return (
     <>
       <StatusBar style="light" />
+
       <Tabs
         screenOptions={{
           headerShown: false,
@@ -57,62 +55,72 @@ export default function RootLayout() {
           name="index"
           options={{
             title: 'Home',
-            tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="home" size={size} color={color} />
+            ),
           }}
         />
+
         <Tabs.Screen name="report" options={{ href: null }} />
+
         <Tabs.Screen
           name="library"
           options={{
             title: 'Exercises',
-            tabBarIcon: ({ color, size }) => <Ionicons name="library" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="library" size={size} color={color} />
+            ),
           }}
         />
+
         <Tabs.Screen
           name="analysis"
           options={{
             title: 'Analyse',
-            tabBarIcon: ({ color, size }) => <Ionicons name="videocam" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="videocam" size={size} color={color} />
+            ),
           }}
         />
+
         <Tabs.Screen
           name="history"
           options={{
             title: 'History',
-            tabBarIcon: ({ color, size }) => <Ionicons name="time" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="time" size={size} color={color} />
+            ),
           }}
         />
+
         <Tabs.Screen
           name="profile"
           options={{
             title: 'Profile',
-            tabBarIcon: ({ color, size }) => <Ionicons name="person" size={size} color={color} />,
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="person" size={size} color={color} />
+            ),
           }}
         />
-        <Tabs.Screen
-          name="rehab"
-          options={{
-            href: null,
-          }}
-        />
-        <Tabs.Screen
-          name="romtracker"
-          options={{
-            href: null,
-          }}
-        />
-        
+
+        <Tabs.Screen name="rehab" options={{ href: null }} />
+        <Tabs.Screen name="romtracker" options={{ href: null }} />
         <Tabs.Screen name="therapist" options={{ href: null }} />
         <Tabs.Screen name="elderly" options={{ href: null }} />
-        
-        {/* CRITICAL FIX: Explicitly hide the tab bar when on the onboarding screen.
-          This ensures a completely clean, full-screen onboarding experience.
-        */}
+
         <Tabs.Screen
           name="onboarding"
           options={{
             href: null,
-            tabBarStyle: { display: 'none' }, // Hides bottom bar entirely
+            tabBarStyle: { display: 'none' },
+          }}
+        />
+
+        <Tabs.Screen
+          name="auth"
+          options={{
+            href: null,
+            tabBarStyle: { display: 'none' },
           }}
         />
       </Tabs>

@@ -56,6 +56,10 @@ export default function ReportScreen() {
   const [loading, setLoading] = useState(true);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [summaryStats, setSummaryStats] = useState(MOCK_REPORT_DATA.summary);
+  const [profile, setProfile] = useState({
+    role: 'patient',
+    disabilities: [] as string[],
+  });
   const router = useRouter();
 
   // ─── Load Session Data on Mount ─────────────────────────────────────────────
@@ -66,6 +70,14 @@ export default function ReportScreen() {
   const loadSessions = async () => {
     try {
       setLoading(true);
+      const [savedRole, savedDisabilities] = await Promise.all([
+        AsyncStorage.getItem('userRole'),
+        AsyncStorage.getItem('disabilities'),
+      ]);
+      setProfile({
+        role: savedRole || 'patient',
+        disabilities: savedDisabilities ? JSON.parse(savedDisabilities) : [],
+      });
       const existingData = await AsyncStorage.getItem('physio_sessions');
       if (existingData) {
         const parsedSessions: Session[] = JSON.parse(existingData);
@@ -137,8 +149,23 @@ export default function ReportScreen() {
 
   // ─── Generate HTML Template Using Real Session Variables ───────────────────
   const generateHTML = () => {
-    const patient = MOCK_REPORT_DATA.patient;
-    const recommendations = MOCK_REPORT_DATA.recommendations;
+    const patient = {
+      ...MOCK_REPORT_DATA.patient,
+      role: profile.role,
+      condition: profile.disabilities.length
+        ? profile.disabilities.join(', ')
+        : 'General movement and exercise programme',
+    };
+    const weaknesses = activeSessions.filter((session) => session.formScore < 80);
+    const recommendations = [
+      ...MOCK_REPORT_DATA.recommendations,
+      ...(weaknesses.length
+        ? ['Prioritise controlled form and review lower-scoring exercises with a physiotherapist.']
+        : ['Maintain current form quality and progress gradually under clinical guidance.']),
+      ...(profile.disabilities.length
+        ? ['Use the selected accessibility adaptations and stop if pain, dizziness, or unusual symptoms occur.']
+        : []),
+    ];
 
     return `
       <!DOCTYPE html>
@@ -262,6 +289,18 @@ export default function ReportScreen() {
         </div>
 
         <div class="section">
+          <h2>Clinical Observations</h2>
+          <div class="info-item">
+            <div class="info-label">Identified weaknesses</div>
+            <div class="info-value">${weaknesses.length ? `${weaknesses.length} session(s) below 80% form score; review control and range of motion.` : 'No significant weaknesses identified from recorded sessions.'}</div>
+          </div>
+          <div class="info-item" style="margin-top:12px">
+            <div class="info-label">Safety note</div>
+            <div class="info-value">This AI-generated report supports, but does not replace, assessment by a qualified healthcare professional.</div>
+          </div>
+        </div>
+
+        <div class="section">
           <h2>Clinical Recommendations</h2>
           ${recommendations.map(r => `<div class="recommendation">✓ ${r}</div>`).join('')}
         </div>
@@ -359,6 +398,22 @@ export default function ReportScreen() {
         </View>
       </View>
 
+      <Text style={styles.sectionTitle}>Clinical Profile</Text>
+      <View style={styles.insightCard}>
+        <Text style={styles.insightLabel}>Role</Text>
+        <Text style={styles.insightValue}>{profile.role}</Text>
+        <Text style={styles.insightLabel}>Accessibility profile</Text>
+        <Text style={styles.insightValue}>
+          {profile.disabilities.length ? profile.disabilities.join(', ') : 'No additional profile selected'}
+        </Text>
+        <Text style={styles.insightLabel}>Observed weakness</Text>
+        <Text style={styles.insightValue}>
+          {activeSessions.some((session) => session.formScore < 80)
+            ? 'Some sessions show form scores below 80%; focus on controlled movement.'
+            : 'No significant weakness detected in recorded sessions.'}
+        </Text>
+      </View>
+
       {/* Session Preview */}
       <Text style={styles.sectionTitle}>Session Summary</Text>
       <View style={styles.sessionList}>
@@ -444,6 +499,9 @@ const styles = StyleSheet.create({
   scoreBadge: { borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
   scoreText: { fontSize: 14, fontWeight: 'bold' },
   recommendationsList: { gap: 10, marginBottom: 24 },
+  insightCard: { backgroundColor: '#17211f', borderRadius: 14, padding: 16, marginBottom: 24, borderWidth: 1, borderColor: '#00d4aa55' },
+  insightLabel: { color: '#00d4aa', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginTop: 8 },
+  insightValue: { color: '#ddd', fontSize: 14, lineHeight: 20, marginTop: 3 },
   recommendationRow: { flexDirection: 'row', alignItems: 'flex-start', backgroundColor: '#1a1a1a', borderRadius: 12, padding: 14, gap: 10 },
   recommendationText: { color: '#aaa', fontSize: 14, flex: 1, lineHeight: 20 },
   actionButtons: { gap: 12 },

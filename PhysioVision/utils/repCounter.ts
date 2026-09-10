@@ -1,51 +1,137 @@
-// ─── Rep Counter Logic ────────────────────────────────────────────────────────
+type Phase = 'extended' | 'contracted' | 'neutral';
 
-type Phase = 'up' | 'down' | 'neutral';
+type ExerciseConfig = {
+  primaryAngle: 'knee' | 'elbow' | 'hip';
+  contractedAt: number;
+  extendedAt: number;
+  movement: 'flexion' | 'extension';
+  targetText: string;
+};
+
+const CONFIGS: Record<string, ExerciseConfig> = {
+  squat: {
+    primaryAngle: 'knee',
+    contractedAt: 110,
+    extendedAt: 160,
+    movement: 'flexion',
+    targetText: 'Reach 110° knee angle or lower, then return above 160°.',
+  },
+  lunge: {
+    primaryAngle: 'knee',
+    contractedAt: 110,
+    extendedAt: 160,
+    movement: 'flexion',
+    targetText: 'Reach about 90–110° knee angle, then stand above 160°.',
+  },
+  push_up: {
+    primaryAngle: 'elbow',
+    contractedAt: 95,
+    extendedAt: 160,
+    movement: 'flexion',
+    targetText: 'Lower until the elbow reaches about 90°, then extend above 160°.',
+  },
+  bicep_curl: {
+    primaryAngle: 'elbow',
+    contractedAt: 65,
+    extendedAt: 145,
+    movement: 'flexion',
+    targetText: 'Curl to 65° or less, then extend the elbow above 145°.',
+  },
+  shoulder_press: {
+    primaryAngle: 'elbow',
+    contractedAt: 95,
+    extendedAt: 160,
+    movement: 'flexion',
+    targetText: 'Lower to about 95°, then press until the elbow is above 160°.',
+  },
+  deadlift: {
+    primaryAngle: 'hip',
+    contractedAt: 100,
+    extendedAt: 160,
+    movement: 'extension',
+    targetText: 'Hinge to about 100° hip angle, then return above 160°.',
+  },
+  glute_bridge: {
+    primaryAngle: 'knee',
+    contractedAt: 110,
+    extendedAt: 160,
+    movement: 'flexion',
+    targetText: 'Bend the knees to about 110°, then return above 160°.',
+  },
+  sit_to_stand: {
+    primaryAngle: 'knee',
+    contractedAt: 115,
+    extendedAt: 160,
+    movement: 'flexion',
+    targetText: 'Reach about 115° knee angle while seated, then stand above 160°.',
+  },
+  plank: {
+    primaryAngle: 'hip',
+    contractedAt: 145,
+    extendedAt: 170,
+    movement: 'extension',
+    targetText: 'Hold a straight body line between 145° and 195°.',
+  },
+};
+
+function normalizeExerciseId(exerciseId: string): string {
+  const normalized = exerciseId.toLowerCase().replace(/-/g, '_');
+  const aliases: Record<string, string> = {
+    squats: 'squat',
+    lunges: 'lunge',
+    pushups: 'push_up',
+    push_ups: 'push_up',
+    bicep_curls: 'bicep_curl',
+  };
+  return aliases[normalized] || normalized;
+}
+
+export function getExerciseTarget(exerciseId: string): string {
+  return (
+    CONFIGS[normalizeExerciseId(exerciseId)]?.targetText ||
+    'Complete a controlled range of motion before the repetition counts.'
+  );
+}
+
+export function isAngleInTargetRange(exerciseId: string, angle: number): boolean {
+  const config = CONFIGS[normalizeExerciseId(exerciseId)];
+  if (!config) return true;
+  if (normalizeExerciseId(exerciseId) === 'plank') {
+    return angle >= config.contractedAt && angle <= 195;
+  }
+  return angle <= config.contractedAt || angle >= config.extendedAt;
+}
 
 export class RepCounter {
   private phase: Phase = 'neutral';
-  private repCount: number = 0;
-  private exerciseId: string;
+  private repCount = 0;
+  private readonly config: ExerciseConfig;
 
   constructor(exerciseId: string) {
-    this.exerciseId = exerciseId;
+    const normalizedId = normalizeExerciseId(exerciseId);
+    this.config = CONFIGS[normalizedId] || CONFIGS.squat;
   }
 
-  // ─── Count reps based on joint angles ──────────────────────────────────────
   update(angles: Record<string, number>): number {
-    const angle = this.getPrimaryAngle(angles);
-    if (angle === null) return this.repCount;
+    const angle = angles[`${this.config.primaryAngle === 'knee' ? 'leftKnee' : this.config.primaryAngle === 'elbow' ? 'leftElbow' : 'leftHip'}`]
+      ?? angles[`${this.config.primaryAngle === 'knee' ? 'rightKnee' : this.config.primaryAngle === 'elbow' ? 'rightElbow' : 'rightHip'}`];
 
-    const { upThreshold, downThreshold } = this.getThresholds();
+    if (typeof angle !== 'number' || !Number.isFinite(angle)) {
+      return this.repCount;
+    }
 
-    // --- TRACK CONFIGURATION TYPE A: FLEXION IS THE EFFORT PHASE ---
-    // (Squats, Lunges, Push-ups, Bicep Curls, Shoulder Press)
-    // High Angle = Up/Extended. Low Angle = Down/Flexed.
-    if (
-      this.exerciseId === 'squat' || 
-      this.exerciseId === 'lunge' || 
-      this.exerciseId === 'push_up' || 
-      this.exerciseId === 'bicep_curl' ||
-      this.exerciseId === 'shoulder_press'
-    ) {
-      if (angle > upThreshold && this.phase !== 'up') {
-        this.phase = 'up';
-      } else if (angle < downThreshold && this.phase === 'up') {
-        this.phase = 'down';
-        this.repCount += 1; // Count rep as they hit deep contraction depth
+    if (this.config.movement === 'flexion') {
+      if (angle >= this.config.extendedAt) {
+        this.phase = 'extended';
+      } else if (angle <= this.config.contractedAt && this.phase === 'extended') {
+        this.phase = 'contracted';
+        this.repCount += 1;
       }
-    } 
-    
-    // --- TRACK CONFIGURATION TYPE B: EXTENSION IS THE EFFORT PHASE ---
-    // (Deadlift, Glute Bridge, Plank)
-    // Low Angle = Hips bent/resting. High Angle = Lockout/Straight line.
-    else {
-      if (angle < downThreshold && this.phase !== 'down') {
-        this.phase = 'down';
-      } else if (angle > upThreshold && this.phase === 'down') {
-        this.phase = 'up';
-        this.repCount += 1; // Count rep upon full muscular lockout extension
-      }
+    } else if (angle <= this.config.contractedAt) {
+      this.phase = 'contracted';
+    } else if (angle >= this.config.extendedAt && this.phase === 'contracted') {
+      this.phase = 'extended';
+      this.repCount += 1;
     }
 
     return this.repCount;
@@ -58,48 +144,5 @@ export class RepCounter {
 
   getCount(): number {
     return this.repCount;
-  }
-
-  // ─── Get the main angle to track per exercise (Matched to analysis.tsx IDs) ───
-  private getPrimaryAngle(angles: Record<string, number>): number | null {
-    switch (this.exerciseId) {
-      case 'squat':
-      case 'lunge':
-      case 'glute_bridge':
-        return angles.leftKnee || angles.rightKnee || null;
-      case 'push_up':
-      case 'bicep_curl':
-      case 'shoulder_press':
-        return angles.leftElbow || angles.rightElbow || null;
-      case 'deadlift':
-      case 'plank':
-        return angles.leftHip || angles.rightHip || null;
-      default:
-        return angles.leftKnee || angles.leftElbow || null;
-    }
-  }
-
-  // ─── Up/Down thresholds per exercise ───────────────────────────────────────
-  private getThresholds(): { upThreshold: number; downThreshold: number } {
-    switch (this.exerciseId) {
-      case 'squat':
-        return { upThreshold: 160, downThreshold: 110 };
-      case 'lunge':
-        return { upThreshold: 160, downThreshold: 110 };
-      case 'push_up':
-        return { upThreshold: 160, downThreshold: 90 };
-      case 'bicep_curl':
-        return { upThreshold: 140, downThreshold: 60 };
-      case 'shoulder_press':
-        return { upThreshold: 160, downThreshold: 90 };
-      case 'deadlift':
-        return { upThreshold: 160, downThreshold: 90 };
-      case 'glute_bridge':
-        return { upThreshold: 150, downThreshold: 100 };
-      case 'plank':
-        return { upThreshold: 170, downThreshold: 140 };
-      default:
-        return { upThreshold: 160, downThreshold: 90 };
-    }
   }
 }

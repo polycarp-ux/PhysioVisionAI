@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const REHAB_PROGRAMS = [
   {
@@ -116,7 +117,34 @@ const REHAB_PROGRAMS = [
 
 export default function RehabScreen() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [role, setRole] = useState('patient');
+  const [disabilities, setDisabilities] = useState<string[]>([]);
   const router = useRouter();
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const [savedRole, savedDisabilities] = await Promise.all([
+        AsyncStorage.getItem('userRole'),
+        AsyncStorage.getItem('disabilities'),
+      ]);
+      setRole(savedRole || 'patient');
+      setDisabilities(savedDisabilities ? JSON.parse(savedDisabilities) : []);
+    };
+    void loadProfile();
+  }, []);
+
+  const wheelchairMode = disabilities.includes('wheelchair');
+  const neurologicalMode = disabilities.includes('neurological');
+  const adaptedMode = disabilities.some((item) =>
+    ['amputee', 'visual', 'hearing', 'other'].includes(item)
+  );
+  const visiblePrograms = REHAB_PROGRAMS.filter((program) =>
+    wheelchairMode ? program.id === 'wheelchair_upper' || program.id === 'shoulder_rehab' :
+    neurologicalMode ? program.id === 'stroke_recovery' || program.id === 'fall_prevention' :
+    adaptedMode ? program.id === 'shoulder_rehab' || program.id === 'back_pain' :
+    role === 'elderly' ? program.id === 'fall_prevention' || program.id === 'knee_recovery' :
+    true
+  );
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -142,7 +170,7 @@ export default function RehabScreen() {
 
       {/* Programs List */}
       <View style={styles.programList}>
-        {REHAB_PROGRAMS.map((program) => (
+        {visiblePrograms.map((program) => (
           <TouchableOpacity
             key={program.id}
             style={styles.programCard}
@@ -205,7 +233,7 @@ export default function RehabScreen() {
                 {/* Start Button */}
                 <TouchableOpacity
                   style={[styles.startBtn, { backgroundColor: program.color }]}
-                  onPress={() => router.push('/analysis')}
+                  onPress={() => router.push({ pathname: '/analysis', params: { exerciseId: program.exercises[0].name } })}
                 >
                   <Ionicons name="videocam" size={18} color="#0a0a0a" />
                   <Text style={styles.startBtnText}>Start Program with AI Analysis</Text>
