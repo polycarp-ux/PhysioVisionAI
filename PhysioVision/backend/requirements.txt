@@ -3,6 +3,6 @@ uvicorn[standard]
 python-dotenv
 firebase-admin
 opencv-python-headless
-numpy
-mediapipe
+numpy<2
+mediapipe==0.10.21
 pydantic

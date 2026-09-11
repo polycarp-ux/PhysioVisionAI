@@ -9,7 +9,9 @@ import cv2
 import numpy as np
 import uvicorn
 from dotenv import load_dotenv
-from mediapipe.python.solutions import pose as mp_pose
+import mediapipe as mp
+
+mp_pose = mp.solutions.pose
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
