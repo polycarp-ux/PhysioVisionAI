@@ -4,5 +4,5 @@ python-dotenv
 firebase-admin
 opencv-python-headless
 numpy<2
-mediapipe==0.10.21
+mediapipe==0.10.30
 pydantic
